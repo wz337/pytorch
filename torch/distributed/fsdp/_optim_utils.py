@@ -33,7 +33,7 @@ from torch.distributed.fsdp._common_utils import (
 from torch.distributed.fsdp._fsdp_extensions import _ext_chunk_tensor
 from torch.distributed.fsdp._runtime_utils import _clear_grads_if_needed, _lazy_init
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
-from torch.distributed.fsdp.api import ShardingStrategy
+from torch.distributed.fsdp.api import ShardingStrategy, StateDictSettings, StateDictType
 from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
 
 
@@ -1344,8 +1344,7 @@ def _optim_state_dict(
             Iterable[nn.Parameter],
         ]
     ],
-    rank0_only: bool,
-    shard_state: bool,
+    state_dict_settings: StateDictSettings,
     group: Optional[dist.ProcessGroup],
     using_optim_input: bool,
     use_orig_params: bool = False,
@@ -1398,8 +1397,12 @@ def _optim_state_dict(
         :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=False``,
         then nonzero ranks return an empty :class:`dict`.
     """
+    rank0_only = getattr(state_dict_settings, "rank0_only", False)
+    shard_state = state_dict_settings.state_dict_type == StateDictType.SHARDED_STATE_DICT
+
     _clear_grads_if_needed(traversal_utils._get_fsdp_handles(model))
-    to_save = not rank0_only or (dist.get_rank(group) == 0 or shard_state)
+    to_save = not rank0_only or (
+        dist.get_rank(group) == 0 or shard_state)
     fsdp_osd: Dict[str, Any] = {"state": {}, "param_groups": []} if to_save else {}
     fsdp_osd_state: Dict[str, Any] = fsdp_osd["state"] if to_save else {}
     param_to_fqns = _get_param_to_fqns(model)

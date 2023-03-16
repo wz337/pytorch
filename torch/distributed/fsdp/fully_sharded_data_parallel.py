@@ -1117,14 +1117,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         model: torch.nn.Module,
         optim: torch.optim.Optimizer,
         optim_state_dict: Dict[str, Any],
+        state_dict_settings: StateDictSettings,
         optim_input: Optional[
             Union[
                 List[Dict[str, Any]],
                 Iterable[torch.nn.Parameter],
             ]
         ] = None,
-        rank0_only: bool = True,
-        full_state_dict: bool = True,
         group: Optional[dist.ProcessGroup] = None,
     ) -> Dict[str, Any]:
         """
@@ -1132,7 +1131,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Given model, optim, the original optim_state_dict, this API removes the
         FSDP internal information and internal sharding from the optim_state_dict.
         """
-        if full_state_dict:
+        rank0_only=getattr(state_dict_settings, "rank0_only", False)
+        if state_dict_settings.state_dict_type == StateDictType.FULL_STATE_DICT:
             FullyShardedDataParallel._warn_optim_input(optim_input)
             using_optim_input = FullyShardedDataParallel._is_using_optim_input(
                 optim_input,
@@ -1154,9 +1154,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             model=model,
             optim=optim,
             optim_state_dict=optim_state_dict,
+            state_dict_settings=state_dict_settings,
             optim_input=optim_input,
-            rank0_only=rank0_only,
-            shard_state=not full_state_dict,
             group=group,
             using_optim_input=using_optim_input,
             use_orig_params=use_orig_params,
@@ -1330,8 +1329,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             model=model,
             optim=optim,
             optim_state_dict=optim.state_dict(),
-            optim_input=optim_input,
-            rank0_only=rank0_only,
+            state_dict_settings=FullyShardedDataParallel.get_state_dict_type(model),
             group=group,
             full_state_dict=True,
         )
@@ -1360,9 +1358,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             model=model,
             optim=optim,
             optim_state_dict=optim.state_dict(),
+            state_dict_settings=FullyShardedDataParallel.get_state_dict_type(model),
             optim_input=None,
-            rank0_only=False,
-            full_state_dict=False,
             group=group,
         )
 
@@ -1748,15 +1745,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             ``model``. The sharding of the optimizer state is based on
             ``state_dict_type``.
         """
-        state_dict_settings = FullyShardedDataParallel.get_state_dict_type(model)
         return FullyShardedDataParallel._optim_state_dict_impl(
             model=model,
             optim=optim,
             optim_state_dict=optim.state_dict(),
+            state_dict_settings=FullyShardedDataParallel.get_state_dict_type(model),
             optim_input=None,
-            rank0_only=getattr(state_dict_settings, "rank0_only", False),
-            full_state_dict=state_dict_settings.state_dict_type
-            == StateDictType.FULL_STATE_DICT,
             group=group,
         )
 
@@ -1794,10 +1788,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             model=model,
             optim=optim,
             optim_state_dict=optim_state_dict,
+            state_dict_settings=state_dict_settings,
             optim_input=None,
-            rank0_only=getattr(state_dict_settings, "rank0_only", False),
-            full_state_dict=state_dict_settings.state_dict_type
-            == StateDictType.FULL_STATE_DICT,
             group=None,
         )
 
