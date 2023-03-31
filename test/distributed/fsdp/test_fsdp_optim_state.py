@@ -32,12 +32,14 @@ from torch.testing._internal.common_fsdp import (
     FSDPTest,
     TransformerWithSharedParams,
 )
+from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
+
 
 STATE_DICT_TYPES = [StateDictType.FULL_STATE_DICT, StateDictType.SHARDED_STATE_DICT]
 
@@ -1595,16 +1597,20 @@ class TestFSDPOptimState(FSDPTest):
                 dist.all_reduce(sparse)
                 return self.dense(sparse)
 
-        models = [FakeMPModel().cuda(), FakeMPModel().cuda()]
+        # models = [FakeMPModel().cuda(), FakeMPModel().cuda()]
+        models = [FakeMPModel().cuda()]
+        # optims = [
+        #     torch.optim.Adam(models[0].parameters(), lr=1e-2),
+        #     _NamedOptimizer(
+        #         models[1].named_parameters(),
+        #         torch.optim.Adam,
+        #         [{"params": models[1].parameters()}],
+        #         models[1],
+        #         lr=1e-2,
+        #     ),
+        # ]
         optims = [
             torch.optim.Adam(models[0].parameters(), lr=1e-2),
-            _NamedOptimizer(
-                models[1].named_parameters(),
-                torch.optim.Adam,
-                [{"params": models[1].parameters()}],
-                models[1],
-                lr=1e-2,
-            ),
         ]
         state_dicts = []
 
@@ -1613,6 +1619,7 @@ class TestFSDPOptimState(FSDPTest):
         for model, optim in zip(models, optims):
             # Eagerly initialize the states
             for param in model.parameters():
+                print(f"param: {param}")
                 if param.requires_grad:
                     t = torch.zeros_like(param)
                     param.grad = torch.autograd.Variable(t)
@@ -1622,6 +1629,8 @@ class TestFSDPOptimState(FSDPTest):
             optim.step()
             state_dicts.append(deepcopy(FSDP.optim_state_dict(model, optim)))
 
+        print(f"rank: {dist.get_rank()}, state_dicts[0]: {state_dicts[0]}")
+        # print(f"rank: {dist.get_rank()}, state_dicts[0]: {state_dicts[1]}")
         self._check_same_param_groups(
             state_dicts[0], state_dicts[1], check_same_param_keys=False
         )

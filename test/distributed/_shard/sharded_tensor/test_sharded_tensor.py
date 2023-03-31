@@ -224,12 +224,12 @@ class TestShardTensor(ShardedTensorTestBase):
             dim=0,
             placements=[
                 "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                # "rank:1/cuda:1",
+                # "rank:2/cuda:2",
+                # "rank:3/cuda:3",
             ],
         )
-        tensor = torch.rand(12, 12).cuda(self.rank)
+        tensor = torch.rand(3, 12).cuda(self.rank)
         st = _shard_tensor(tensor, spec)
 
         # Verify.

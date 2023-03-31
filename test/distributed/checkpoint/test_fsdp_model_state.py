@@ -27,6 +27,7 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
 
         model = FSDP(torch.nn.Linear(8, 8, device="meta"))
         model(torch.rand(8, 8, device=dist.get_rank())).sum().backward()
+        print(f"state_dict before save: {model.state_dict()}")
 
         with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
             state_dict = {
@@ -60,6 +61,8 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
                 planner=DefaultLoadPlanner(),
             )
             model_2.load_state_dict(state_dict["model"])
+
+        print(f"state_dict after load: {model.state_dict()}")
 
         with FSDP.summon_full_params(model):
             with FSDP.summon_full_params(model_2):

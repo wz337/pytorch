@@ -1150,6 +1150,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             for m in FullyShardedDataParallel.fsdp_modules(model)
         ), "Not all FSDP modules have the same _use_orig_params value"
 
+        state_dict_settings = FullyShardedDataParallel.get_state_dict_type(model)
+
         return _optim_state_dict(
             model=model,
             optim=optim,
@@ -1159,6 +1161,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             shard_state=not full_state_dict,
             group=group,
             using_optim_input=using_optim_input,
+            state_dict_settings=state_dict_settings,
             use_orig_params=use_orig_params,
         )
 

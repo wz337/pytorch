@@ -235,7 +235,7 @@ class DefaultLoadPlanner(LoadPlanner):
             tensor, read_item.dest_offsets, read_item.lengths
         )
 
-
+import torch.distributed as dist
 def create_default_local_load_plan(
     state_dict: Dict[str, Any],
     metadata: Metadata,
@@ -252,6 +252,7 @@ def create_default_local_load_plan(
     """
     for fqn, obj in state_dict.items():
         md = metadata.state_dict_metadata[fqn]
+        print(f"load -- rank:{dist.get_rank()}, fqn:{fqn}, md:{md}")
         requests += _create_read_items(fqn, md, obj)
 
     return LoadPlan(requests)
@@ -282,6 +283,7 @@ def create_default_local_save_plan(
     """
     requests = []
     for fqn, obj in state_dict.items():
+        print(f"save -- rank:{dist.get_rank()}, fqn:{fqn}")
         if isinstance(obj, (ShardedTensor, DTensor)) or is_coordinator:
             requests += _create_write_items(fqn, obj)
     return SavePlan(requests)

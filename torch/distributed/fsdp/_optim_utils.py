@@ -33,8 +33,15 @@ from torch.distributed.fsdp._common_utils import (
 from torch.distributed.fsdp._fsdp_extensions import _ext_chunk_tensor
 from torch.distributed.fsdp._runtime_utils import _clear_grads_if_needed, _lazy_init
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
-from torch.distributed.fsdp.api import ShardingStrategy
+from torch.distributed.fsdp.api import ShardingStrategy, StateDictSettings, StateDictType
 from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
+from torch.distributed._shard import sharded_tensor
+from torch.distributed._shard.metadata import ShardMetadata
+from torch.distributed._shard.sharded_tensor.api import TensorProperties
+from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
+from torch.distributed.remote_device import _remote_device
+from torch.distributed._shard.sharded_tensor.shard import Shard
+
 
 
 @dataclass
@@ -1348,6 +1355,7 @@ def _optim_state_dict(
     shard_state: bool,
     group: Optional[dist.ProcessGroup],
     using_optim_input: bool,
+    state_dict_settings: StateDictSettings,
     use_orig_params: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -1400,6 +1408,8 @@ def _optim_state_dict(
     """
     _clear_grads_if_needed(traversal_utils._get_fsdp_handles(model))
     to_save = not rank0_only or (dist.get_rank(group) == 0 or shard_state)
+    # local_state=state_dict_settings.state_dict_type == StateDictType.LOCAL_STATE_DICT
+    local_state = True
     fsdp_osd: Dict[str, Any] = {"state": {}, "param_groups": []} if to_save else {}
     fsdp_osd_state: Dict[str, Any] = fsdp_osd["state"] if to_save else {}
     param_to_fqns = _get_param_to_fqns(model)
@@ -1429,10 +1439,13 @@ def _optim_state_dict(
 
     # Iterate in rank 0's flattened parameter ID order to ensure aligned
     # all-gathers across ranks
+    shards_metadata = []
+    shards = []
     for optim_state_key in all_optim_state_keys:
         param_key: Union[str, int, None] = optim_state_key_to_param_key.get(
             optim_state_key, None
         )
+        # print(param_key)
 
         if param_key is None:
             assert use_orig_params, (
@@ -1448,7 +1461,36 @@ def _optim_state_dict(
             # is sufficient to fetch the FSDPParamInfo.
             fqn = optim_state_key.unflat_param_names[0]
             fsdp_param_info = fqn_to_fsdp_param_info[fqn]
-            if use_orig_params:
+            if local_state:
+                # flat_fqn = flat_param_to_fqn[fsdp_param_info.flat_param]
+                # fsdp_osd_state[flat_fqn] = {}
+                for k, v in optim_state_dict['state'][param_key].items(): 
+                    # print(f"rank:{dist.get_rank()}, param_key:{param_key}, optim_state_dict['state'][param_key]:{optim_state_dict['state'][param_key]}")                       
+                    if (
+                        isinstance(v, torch.Tensor)
+                        and not v.size() == torch.Size([])  # skip "step" 
+                        and not v.size() == torch.Size([0])  # skip empty tensor: exp_avg: torch.Tensor([]), exp_avg_step: torch.Tensor([])
+                    ):
+                        local_size = v.size()
+                        global_size = list(local_size)
+                        global_size[0] = (
+                            global_size[0] * dist.get_world_size()
+                        )
+                        placements = []
+                        for r in range(dist.get_world_size()):
+                            if v.is_cuda:
+                                placements.append(f"rank:{r}/cuda:{r % torch.cuda.device_count()}")
+                            else:
+                                placements.append(f"rank:{r}/cpu")
+                        fsdp_osd_state[param_key][k] = ShardedTensor._init_from_local_tensor(
+                            v,
+                            ChunkShardingSpec(
+                                dim=0,
+                                placements=placements,
+                            ),
+                            global_size,
+                        )
+            elif use_orig_params:
                 state = (
                     {} if param_key is None else optim_state_dict["state"][param_key]
                 )
@@ -1467,7 +1509,7 @@ def _optim_state_dict(
                     to_save,
                     shard_state,
                 )
-            if to_save:
+            if to_save and not local_state:
                 assert len(unflat_state) == len(optim_state_key.unflat_param_names)
                 for unflat_param_name, unflat_param_state in zip(
                     optim_state_key.unflat_param_names,
