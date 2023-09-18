@@ -1,10 +1,10 @@
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
+import torch as torch
 import torch.nn as nn
-from torch.distributed.tensor.parallel._data_parallel_utils import (
-    _flatten_tensor,
-    _unflatten_tensor,
-)
+from torch.distributed._tensor import DTensor as DistributedTensor, Shard as DShard
+from torch.distributed._tensor.placement_types import DTensorSpec
+
 
 __all__ = ["pre_dp_module_transform"]
 
@@ -57,6 +57,26 @@ def _localize_dtensor(module: nn.Module, *_: Any):
             t._st_info = sharding_info  # type: ignore[attr-defined]
             param_list.append((*_get_submodule_n_params(module, name), t))
     _update_module_param(param_list)  # type: ignore[arg-type]
+
+
+def _flatten_tensor(
+    tensor: torch.Tensor,
+) -> Tuple[torch.Tensor, Optional[DTensorSpec]]:
+    if isinstance(tensor, DistributedTensor):
+        tensor._local_tensor.requires_grad_()
+        return tensor._local_tensor, tensor._spec
+    return tensor, None
+
+
+def _unflatten_tensor(tensor: torch.Tensor, spec: DTensorSpec) -> torch.Tensor:
+    result = DistributedTensor.from_local(
+        tensor,
+        spec.mesh,
+        spec.placements,
+        run_check=False,
+    )
+
+    return result
 
 
 def pre_dp_module_transform(module: nn.Module):
