@@ -37,6 +37,7 @@ else:
         _find_pg_by_ranks_and_tag,
         _get_default_group,
         _get_group_tag,
+        broadcast_object_list,
         get_backend_config,
         get_process_group_ranks,
         get_rank,
@@ -287,6 +288,7 @@ else:
                         dim_group = _find_pg_by_ranks_and_tag(
                             tag="", ranks=subgroup_ranks
                         )
+                        print(f"{dim_group=}")
                         if not dim_group:
                             # call new_group regardless of the current rank in the
                             # pg or not, it's required that all ranks participate
@@ -491,18 +493,22 @@ else:
             Returns:
                 A :class:`DeviceMesh` object.
             """
-            global_ranks = get_process_group_ranks(process_group)
+            group_ranks = get_process_group_ranks(process_group)
             cur_rank = get_rank()
+            src_rank = group_ranks[0]
 
-            # if cur_rank not in global_ranks:
-            #     return DeviceMesh(device_type="cpu", mesh=[[]])
-
-            if "nccl" in get_backend_config(process_group):
-                device_type = "cuda"
+            # Need to broadcast the device_type to the all ranks even if they are not participating in the given process_group,
+            # since we need to call DeviceMesh constructor on all ranks particpated in default process_group.
+            if src_rank == cur_rank:
+                if "nccl" in get_backend_config(process_group):
+                    device_type = ["cuda"]
+                else:
+                    device_type = ["cpu"]
             else:
-                device_type = "cpu"
+                device_type = [None]
+            broadcast_object_list(device_type, src=src_rank)
 
-            return DeviceMesh(device_type=device_type, mesh=global_ranks)
+            return DeviceMesh(device_type=device_type[0], mesh=group_ranks)
 
 
 

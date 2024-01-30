@@ -221,10 +221,11 @@ class DeviceMeshTest(DTensorTestBase):
 
     @with_comms
     def test_from_process_group(self):
-        pg = new_group(backend="gloo", ranks=[0, 1])
+        pg = new_group(backend="gloo", ranks=[1, 3])
         mesh_from_pg = DeviceMesh.from_process_group(pg)
 
-        print(f"{mesh_from_pg=}")
+        mesh_group = mesh_from_pg.get_group()
+        self.assertEqual(pg, mesh_group)
 
 
 class DeviceMeshTestNDim(DTensorTestBase):
