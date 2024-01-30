@@ -37,6 +37,7 @@ else:
         _find_pg_by_ranks_and_tag,
         _get_default_group,
         _get_group_tag,
+        get_process_group_ranks,
         get_rank,
         get_world_size,
         init_process_group,
@@ -474,6 +475,26 @@ else:
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
+
+        @staticmethod
+        def from_process_group(self, group: ProcessGroup) -> "DeviceMesh":
+            # QQ: Should we name it from_group or from_process_group?
+            """
+            Creates a DeviceMesh from a ProcessGroup.
+
+            Args:
+                group (ProcessGroup): The ProcessGroup to create the DeviceMesh from.
+
+            Returns:
+                A :class:`DeviceMesh` object.
+
+            Raises:
+                ValueError: If the input ProcessGroup does not contain any ranks.
+            """
+            mesh = get_process_group_ranks(group)
+            # backend =
+
+
 
     def init_device_mesh(
         device_type: str,
