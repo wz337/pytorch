@@ -16,6 +16,7 @@ from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_devi
 from torch.distributed.distributed_c10d import (
     _get_process_group_name,
     _world,
+    get_backend_config,
     get_global_rank,
     get_process_group_ranks,
     get_world_size,
@@ -151,6 +152,9 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(mesh_2d.get_group("dp"), dp_mesh.get_group())
         self.assertEqual(mesh_2d.get_group("tp"), tp_mesh.get_group())
 
+        dp_group = mesh_2d.get_group("dp")
+        print(get_backend_config(dp_group))
+
     @with_comms
     def test_get_local_rank_raises_exception(self):
         mesh_shape = (2, self.world_size // 2)
@@ -214,6 +218,13 @@ class DeviceMeshTest(DTensorTestBase):
             local_tensor, gather_dim=0, group=(mesh, 0)
         )
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
+
+    @with_comms
+    def test_from_process_group(self):
+        pg = new_group(backend="gloo", ranks=[0, 1])
+        mesh_from_pg = DeviceMesh.from_process_group(pg)
+
+        print(f"{mesh_from_pg=}")
 
 
 class DeviceMeshTestNDim(DTensorTestBase):

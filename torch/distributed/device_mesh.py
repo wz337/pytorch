@@ -37,6 +37,7 @@ else:
         _find_pg_by_ranks_and_tag,
         _get_default_group,
         _get_group_tag,
+        get_backend_config,
         get_process_group_ranks,
         get_rank,
         get_world_size,
@@ -477,22 +478,31 @@ else:
             return self._coordinate_on_dim if self._coordinate_on_dim else None
 
         @staticmethod
-        def from_process_group(self, group: ProcessGroup) -> "DeviceMesh":
+        def from_process_group(process_group: ProcessGroup) -> "DeviceMesh":
             # QQ: Should we name it from_group or from_process_group?
             """
             Creates a DeviceMesh from a ProcessGroup.
+
+            .. note:: We only support creating a 1D mesh from a given process group.
 
             Args:
                 group (ProcessGroup): The ProcessGroup to create the DeviceMesh from.
 
             Returns:
                 A :class:`DeviceMesh` object.
-
-            Raises:
-                ValueError: If the input ProcessGroup does not contain any ranks.
             """
-            mesh = get_process_group_ranks(group)
-            # backend =
+            global_ranks = get_process_group_ranks(process_group)
+            cur_rank = get_rank()
+
+            # if cur_rank not in global_ranks:
+            #     return DeviceMesh(device_type="cpu", mesh=[[]])
+
+            if "nccl" in get_backend_config(process_group):
+                device_type = "cuda"
+            else:
+                device_type = "cpu"
+
+            return DeviceMesh(device_type=device_type, mesh=global_ranks)
 
 
 
