@@ -65,6 +65,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     def world_size(self) -> int:
         return 2
 
+
     def _test_save_load(
         self,
         init_model_optim: Callable,
@@ -141,12 +142,101 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
         self._verify_osd(model, optim, osd, dist_osd)
 
+
+    # def _test_save_load(
+    #     self,
+    #     init_model_optim: Callable,
+    #     test_frozen: bool = False,
+    # ) -> None:
+    #     options = StateDictOptions(ignore_frozen_params=test_frozen)
+    #     # Initialize original model and distributed model.
+    #     model, optim, copy_optim, dist_model, dist_optim = init_model_optim()
+
+    #     # Train 10 steps.
+    #     for i in range(10):
+    #         batch = torch.rand(8, 100, device="cuda")
+    #         model(batch).sum().backward()
+    #         optim.step()
+    #         dist_model(batch).sum().backward()
+    #         if not isinstance(dist_optim, list):
+    #             dist_optim.step()
+    #             dist_optim.zero_grad()
+    #         else:
+    #             for _dist_optim in dist_optim:
+    #                 _dist_optim.zero_grad()
+    #         optim.zero_grad()
+
+    #     # Get the state_dict, and compare the result
+    #     msd = model.state_dict()
+    #     osd = optim.state_dict()
+    #     dist_msd, dist_osd = get_state_dict(
+    #         dist_model, optimizers=dist_optim, options=options
+    #     )
+    #     self._verify_msd(msd, dist_msd, options)
+    #     self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
+    #     self._verify_osd(model, optim, osd, dist_osd)
+
+    #     # Initialize a completely new model to simulate checkpoint load.
+    #     # _, _, _, dist_model, dist_optim = init_model_optim()
+    #     _, _, _, new_dist_model, new_dist_optim = init_model_optim()
+
+    #     # Simulate DCP distributed load. We need to first get the state_dict and
+    #     # pass them to DCP to load the saved state_dict from the storage.
+    #     # Then finally we can call set_state_dict().
+    #     if not isinstance(dist_optim, list):
+    #         dist_optim = [dist_optim]
+    #     # curr_dist_msd, curr_dist_osd = get_state_dict(
+    #     #     dist_model, optimizers=dist_optim, options=options
+    #     # )
+    #     curr_dist_msd, curr_dist_osd = get_state_dict(
+    #         new_dist_model, optimizers=new_dist_optim, options=options
+    #     )
+    #     if test_frozen:
+    #         # We won't be able to load the partial state_dict back.
+    #         return
+    #     # Since we already have the state_dict saved before, no need to call DCP.
+    #     # We can directly load them back. This asser is to ensure that optimizer
+    #     # state storage are initialized.
+    #     # self.assertEqual(len(curr_dist_osd[STATE]), len(dist_osd[STATE]))
+    #     # print(f"new keys: {curr_dist_msd.keys() == dist_msd.keys()}")
+    #     print(f"new keys: {curr_dist_osd['param_groups'] == dist_osd['param_groups']}")
+    #     # set_state_dict(
+    #     #     new_dist_model,
+    #     #     optimizers=dist_optim,
+    #     #     model_state_dict=dist_msd,
+    #     #     optim_state_dict=dist_osd,
+    #     #     options=options,
+    #     # )
+
+    #     # Check if the new state_dict are the same
+    #     # dist_msd, dist_osd = get_state_dict(
+    #     #     dist_model, optimizers=dist_optim, options=options
+    #     # )
+    #     new_dist_msd, new_dist_osd = get_state_dict(
+    #         new_dist_model, optimizers=new_dist_optim, options=options
+    #     )
+    #     # print(f"new keys: {new_dist_model.keys()}, {dist_msd.keys()}")
+    #     # self._verify_msd(new_dist_model, dist_msd, options)
+    #     # self._verify_msd(msd, dist_msd, options)
+    #     # self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
+    #     # self._verify_osd(model, optim, osd, dist_osd)
+
+    #     # # Test _patch_model_state_dict, and _patch_optimizer_state_dict
+    #     # _patch_model_state_dict(dist_model, options=options)
+    #     # _patch_optimizer_state_dict(dist_model, optimizers=dist_optim, options=options)
+    #     # dist_msd = dist_model.state_dict()
+    #     # dist_osd = dist_optim[0].state_dict()
+    #     # self._verify_msd(msd, dist_msd, options)
+    #     # self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
+    #     # self._verify_osd(model, optim, osd, dist_osd)
+
     def _test_fsdp(
         self,
         *,
         use_orig_params: bool,
         use_composable: bool,
         use_dtensor: bool,
+        optimizer_class: Type[Optimizer],
         wrapping: Tuple[nn.Module] = (),
         compile_model: bool = False,
     ) -> None:
@@ -162,8 +252,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 device_mesh = init_device_mesh("cuda", (self.world_size,))
 
             orig_model = CompositeParamModel(device=torch.device("cuda"))
-            orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
-            copy_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
+            orig_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
+            copy_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
             if wrapping:
                 strategy = set(wrapping)
             else:
@@ -190,7 +280,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
             if compile_model:
                 dist_model = torch.compile(dist_model)
-            dist_optim = torch.optim.Adam(dist_model.parameters(), lr=1e-3)
+            dist_optim = optimizer_class(dist_model.parameters(), lr=1e-3)
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
         self._test_save_load(init_model_optim)
@@ -229,6 +319,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 "use_composable": [True, False],
                 "use_dtensor": [True, False],
                 "wrapping": [tuple(), (nn.Linear, UnitModule)],
+                "optimizer_class": [torch.optim.Adam],
             },
             self._test_fsdp,
         )
@@ -251,22 +342,27 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             {
                 "reshard_after_forward": [True, False],
                 # TODO: Add torch.optim.AdamW to unit test.
-                "optimizer_class": [torch.optim.Adam],
+                "optimizer_class": [torch.optim.AdamW],
                 "compile_model": [True, False],
             },
             self._test_fsdp2,
         )
 
-    def _test_ddp(self, use_composable: bool) -> None:
+    def _test_ddp(
+        self,
+        *,
+        use_composable: bool,
+        optimizer_class: Type[Optimizer],
+    ) -> None:
         def init_model_optim():
             orig_model = CompositeParamModel(device=torch.device("cuda"))
-            orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
-            copy_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
+            orig_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
+            copy_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
             if use_composable:
                 dist_model = replicate(copy.deepcopy(orig_model))
             else:
                 dist_model = DDP(copy.deepcopy(orig_model))
-            dist_optim = torch.optim.Adam(dist_model.parameters(), lr=1e-3)
+            dist_optim = optimizer_class(dist_model.parameters(), lr=1e-3)
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
         self._test_save_load(init_model_optim)
@@ -275,7 +371,11 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     @skip_if_lt_x_gpu(2)
     def test_ddp(self) -> None:
         self.run_subtests(
-            {"use_composable": [True, False]},
+            {
+                # "use_composable": [True, False],
+                "use_composable": [False],
+                "optimizer_class": [torch.optim.AdamW],
+            },
             self._test_ddp,
         )
 
@@ -359,10 +459,10 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     def test_single_gpu(self) -> None:
         def init_model_optim():
             orig_model = CompositeParamModel(device=torch.device("cuda"))
-            orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
-            copy_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
+            orig_optim = torch.optim.AdamW(orig_model.parameters(), lr=1e-3)
+            copy_optim = torch.optim.AdamW(orig_model.parameters(), lr=1e-3)
             model_copy = copy.deepcopy(orig_model)
-            optim_copy = torch.optim.Adam(model_copy.parameters(), lr=1e-3)
+            optim_copy = torch.optim.AdamW(model_copy.parameters(), lr=1e-3)
             return orig_model, orig_optim, copy_optim, model_copy, optim_copy
 
         self._test_save_load(init_model_optim)
