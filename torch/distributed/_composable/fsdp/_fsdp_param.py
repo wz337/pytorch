@@ -318,14 +318,34 @@ class FSDPParam:
             if self.pin_memory:
                 padded_sharded_param = padded_sharded_param.pin_memory()
         self._sharded_param_data = padded_sharded_param.view(-1)
+        # self.sharded_param = nn.Parameter(
+        #     self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
+        # )
         self.sharded_param = nn.Parameter(
-            self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
+            self.to_sharded_dtensor(padded_sharded_param)
         )
         self.sharded_param.requires_grad_(param.requires_grad)
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
         self.sharded_state = ShardedState.SHARDED
+        """
+        without DTensor local_tensor taking in padded data
+        shard_rank=0, dtensor param without padding: self.sharded_param.to_local().shape=torch.Size([2, 16]), padded_sharded_param:padded_sharded_param.shape=torch.Size([2, 16]), _sharded_param_datatorch.Size([32])
+        shard_rank=0, dtensor param without padding: self.sharded_param.to_local().shape=torch.Size([2]), padded_sharded_param:padded_sharded_param.shape=torch.Size([2]), _sharded_param_datatorch.Size([2])
+        world_size: 8, rank7 needs padding.
+        shard_rank=7, dtensor param without padding: self.sharded_param.to_local().shape=torch.Size([1, 16]), padded_sharded_param:padded_sharded_param.shape=torch.Size([2, 16]), _sharded_param_datatorch.Size([32])
+        shard_rank=7, dtensor param without padding: self.sharded_param.to_local().shape=torch.Size([1]), padded_sharded_param:padded_sharded_param.shape=torch.Size([2]), _sharded_param_datatorch.Size([2])
+        """
+        """
+        with DTensor local_tensor taking in padded data
+        shard_rank=0, dtensor param without padding: self.sharded_param.to_local().shape=torch.Size([2, 16]), padded_sharded_param:padded_sharded_param.shape=torch.Size([2, 16]), _sharded_param_datatorch.Size([32])
+        shard_rank=0, dtensor param without padding: self.sharded_param.to_local().shape=torch.Size([2]), padded_sharded_param:padded_sharded_param.shape=torch.Size([2]), _sharded_param_datatorch.Size([2])
+        world_size: 8, rank7 needs padding.
+        shard_rank=7, dtensor param without padding: self.sharded_param.to_local().shape=torch.Size([2, 16]), padded_sharded_param:padded_sharded_param.shape=torch.Size([2, 16]), _sharded_param_datatorch.Size([32])
+        shard_rank=7, dtensor param without padding: self.sharded_param.to_local().shape=torch.Size([2]), padded_sharded_param:padded_sharded_param.shape=torch.Size([2]), _sharded_param_datatorch.Size([2])
+        """
+        print(f"{shard_rank=}, dtensor param without padding: {self.sharded_param.to_local().shape=}, padded_sharded_param:{padded_sharded_param.shape=}, _sharded_param_data{self._sharded_param_data.shape}")
 
     def _init_sharded_post_forward_param_metadata(self, param: torch.Tensor) -> None:
         mesh_info = self.post_forward_mesh_info
@@ -525,10 +545,11 @@ class FSDPParam:
         Converts a local tensor representing either the sharded parameter or
         sharded gradient to DTensor.
         """
-        if tensor.shape != self.sharded_size:
-            _raise_assert_with_print(
-                f"Expects size {self.sharded_size} but got {tensor.shape}"
-            )
+        # if tensor.shape != self.sharded_size:
+        #     _raise_assert_with_print(
+        #         f"Expects size {self.sharded_size} but got {tensor.shape}"
+        #     )
+        # let dtensor takes the padded_param as local tensor
         return _from_local_no_grad(
             tensor,
             self._sharding_spec,

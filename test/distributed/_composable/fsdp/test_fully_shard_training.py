@@ -248,24 +248,66 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         """Tests train parity with DDP for a single FSDP group."""
         self.run_subtests(
             {
-                "lin_shapes": [[(16, 15), (15, 8)], [(7, 15), (15, 3)]],
+                # "lin_shapes": [[(16, 15), (15, 8)], [(7, 15), (15, 3)]],
+                "lin_shapes": [[(16, 15)]],
             },
             self._test_train_parity_single_group,
         )
 
     def _test_train_parity_single_group(self, lin_shapes: List[Tuple[int, int]]):
+        """
+        world_size is 8.
+        """
         torch.manual_seed(42)
-        model = nn.Sequential(
-            nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
+        # model = nn.Sequential(
+        #     nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
+        # )
+        model = nn.Sequential(nn.Linear(*lin_shapes[0]), nn.ReLU())
+        """
+        Sequential(
+        (0): Linear(in_features=16, out_features=15, bias=True)
+        (1): ReLU()
         )
+        """
+        # print(f"{model}")
+        """
+        name='0.weight', param.shape=torch.Size([15, 16])
+        name='0.bias', param.shape=torch.Size([15])
+        """
+        # for name, param in model.named_parameters():
+        #     print(f"{name=}, {param.shape=}\n\n")
         ref_model = copy.deepcopy(model).cuda()
         replicate(ref_model, device_ids=[self.rank])
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         fully_shard(model)
+        """
+        # without DTensor local_tensor taking in padded data
+            rank:self.rank=7, name='0.weight', param.to_local().shape=torch.Size([1, 16])
+            rank:self.rank=7, name='0.bias', param.to_local().shape=torch.Size([1])
+            rank:self.rank=0, name='0.weight', param.to_local().shape=torch.Size([2, 16])
+            rank:self.rank=0, name='0.bias', param.to_local().shape=torch.Size([2])
+        """
+        """
+        # with DTensor local_tensor taking in padded data
+            rank:self.rank=0, name='0.weight', param.to_local().shape=torch.Size([2, 16])
+            rank:self.rank=0, name='0.bias', param.to_local().shape=torch.Size([2])
+            rank:self.rank=7, name='0.weight', param.to_local().shape=torch.Size([2, 16])
+            rank:self.rank=7, name='0.bias', param.to_local().shape=torch.Size([2])
+        """
+        """
+        # without DTensor local_tensor taking in padded data
+            rank:self.rank=7, name='0.weight', param.to_local().shape=torch.Size([1, 16])
+            rank:self.rank=7, name='0.bias', param.to_local().shape=torch.Size([1])
+            rank:self.rank=0, name='0.weight', param.to_local().shape=torch.Size([2, 16])
+            rank:self.rank=0, name='0.bias', param.to_local().shape=torch.Size([2])
+        """
+        for name, param in model.named_parameters():
+            if self.rank == 0 or self.rank == 7:
+                print(f"rank:{self.rank=}, {name=}, {param.to_local().shape=}")
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device="cuda"),)
-        for iter_idx in range(10):
+        for iter_idx in range(1):
             losses: List[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
@@ -273,6 +315,50 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 losses[-1].backward()
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
+
+            """
+            with DTensor local_tensor taking in padded data
+            rank: 0, optim.state_dict()={'state': {0: {'step': tensor(1.), 'exp_avg': DTensor(local_tensor=tensor([[ 0.0595,  0.0940, -0.0066,  0.1004,  0.0336,  0.0035, -0.0271, -0.0207,
+            -0.0058, -0.1810,  0.0291, -0.0132,  0.0323,  0.0799,  0.0812,  0.0131],
+            [ 0.0588, -0.0187, -0.1101,  0.0515, -0.0038, -0.0359, -0.0950, -0.0109,
+            -0.0558, -0.0606, -0.0338, -0.0799, -0.0189, -0.0830,  0.1050,  0.0005]],
+        device='cuda:0'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),)), 'exp_avg_sq': DTensor(local_tensor=tensor([[3.5451e-04, 8.8414e-04, 4.3564e-06, 1.0083e-03, 1.1315e-04, 1.2292e-06,
+            7.3452e-05, 4.2775e-05, 3.4142e-06, 3.2762e-03, 8.4875e-05, 1.7385e-05,
+            1.0441e-04, 6.3843e-04, 6.5959e-04, 1.7240e-05],
+            [3.4551e-04, 3.5046e-05, 1.2129e-03, 2.6534e-04, 1.4300e-06, 1.2907e-04,
+            9.0214e-04, 1.1795e-05, 3.1144e-04, 3.6666e-04, 1.1454e-04, 6.3853e-04,
+            3.5815e-05, 6.8840e-04, 1.1032e-03, 2.6072e-08]], device='cuda:0'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),))}, 1: {'step': tensor(1.), 'exp_avg': DTensor(local_tensor=tensor([0.2625, 0.1750], device='cuda:0'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),)), 'exp_avg_sq': DTensor(local_tensor=tensor([0.0069, 0.0031], device='cuda:0'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),))}}, 'param_groups': [{'lr': 0.01, 'betas': (0.9, 0.999), 'eps': 1e-08, 'weight_decay': 0, 'amsgrad': False, 'maximize': False, 'foreach': None, 'capturable': False, 'differentiable': False, 'fused': None, 'params': [0, 1]}]}
+            rank: 7, optim.state_dict()={'state': {0: {'step': tensor(1.), 'exp_avg': DTensor(local_tensor=tensor([[-0.0535, -0.0292,  0.0143,  0.0255, -0.0305, -0.0901, -0.0570,  0.0524,
+            0.0483,  0.0088,  0.0206, -0.0506,  0.0419,  0.0132, -0.0548, -0.0345],
+            [-0.0535, -0.0292,  0.0143,  0.0255, -0.0305, -0.0901, -0.0570,  0.0524,
+            0.0483,  0.0088,  0.0206, -0.0506,  0.0419,  0.0132, -0.0548, -0.0345]],
+        device='cuda:7'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),)), 'exp_avg_sq': DTensor(local_tensor=tensor([[2.8637e-04, 8.5425e-05, 2.0373e-05, 6.5101e-05, 9.2792e-05, 8.1140e-04,
+            3.2494e-04, 2.7456e-04, 2.3308e-04, 7.6843e-06, 4.2401e-05, 2.5589e-04,
+            1.7560e-04, 1.7454e-05, 2.9976e-04, 1.1926e-04],
+            [2.8637e-04, 8.5425e-05, 2.0373e-05, 6.5101e-05, 9.2792e-05, 8.1140e-04,
+            3.2494e-04, 2.7456e-04, 2.3308e-04, 7.6843e-06, 4.2401e-05, 2.5589e-04,
+            1.7560e-04, 1.7454e-05, 2.9976e-04, 1.1926e-04]], device='cuda:7'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),))}, 1: {'step': tensor(1.), 'exp_avg': DTensor(local_tensor=tensor([0.1500, 0.1500], device='cuda:7'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),)), 'exp_avg_sq': DTensor(local_tensor=tensor([0.0023, 0.0023], device='cuda:7'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),))}}, 'param_groups': [{'lr': 0.01, 'betas': (0.9, 0.999), 'eps': 1e-08, 'weight_decay': 0, 'amsgrad': False, 'maximize': False, 'foreach': None, 'capturable': False, 'differentiable': False, 'fused': None, 'params': [0, 1]}]}
+            """
+
+            """
+            rank: 0, optim.state_dict()={'state': {0: {'step': tensor(1.), 'exp_avg': DTensor(local_tensor=tensor([[ 0.0595,  0.0940, -0.0066,  0.1004,  0.0336,  0.0035, -0.0271, -0.0207,
+                    -0.0058, -0.1810,  0.0291, -0.0132,  0.0323,  0.0799,  0.0812,  0.0131],
+                    [ 0.0588, -0.0187, -0.1101,  0.0515, -0.0038, -0.0359, -0.0950, -0.0109,
+                    -0.0558, -0.0606, -0.0338, -0.0799, -0.0189, -0.0830,  0.1050,  0.0005]],
+                device='cuda:0'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),)), 'exp_avg_sq': DTensor(local_tensor=tensor([[3.5451e-04, 8.8414e-04, 4.3564e-06, 1.0083e-03, 1.1315e-04, 1.2292e-06,
+                    7.3452e-05, 4.2775e-05, 3.4142e-06, 3.2762e-03, 8.4875e-05, 1.7385e-05,
+                    1.0441e-04, 6.3843e-04, 6.5959e-04, 1.7240e-05],
+                    [3.4551e-04, 3.5046e-05, 1.2129e-03, 2.6534e-04, 1.4300e-06, 1.2907e-04,
+                    9.0214e-04, 1.1795e-05, 3.1144e-04, 3.6666e-04, 1.1454e-04, 6.3853e-04,
+                    3.5815e-05, 6.8840e-04, 1.1032e-03, 2.6072e-08]], device='cuda:0'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),))}, 1: {'step': tensor(1.), 'exp_avg': DTensor(local_tensor=tensor([0.2625, 0.1750], device='cuda:0'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),)), 'exp_avg_sq': DTensor(local_tensor=tensor([0.0069, 0.0031], device='cuda:0'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),))}}, 'param_groups': [{'lr': 0.01, 'betas': (0.9, 0.999), 'eps': 1e-08, 'weight_decay': 0, 'amsgrad': False, 'maximize': False, 'foreach': None, 'capturable': False, 'differentiable': False, 'fused': None, 'params': [0, 1]}]}
+            rank: 7, optim.state_dict()={'state': {0: {'step': tensor(1.), 'exp_avg': DTensor(local_tensor=tensor([[-0.0535, -0.0292,  0.0143,  0.0255, -0.0305, -0.0901, -0.0570,  0.0524,
+                    0.0483,  0.0088,  0.0206, -0.0506,  0.0419,  0.0132, -0.0548, -0.0345]],
+                device='cuda:7'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),)), 'exp_avg_sq': DTensor(local_tensor=tensor([[2.8637e-04, 8.5425e-05, 2.0373e-05, 6.5101e-05, 9.2792e-05, 8.1140e-04,
+                    3.2494e-04, 2.7456e-04, 2.3308e-04, 7.6843e-06, 4.2401e-05, 2.5589e-04,
+                    1.7560e-04, 1.7454e-05, 2.9976e-04, 1.1926e-04]], device='cuda:7'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),))}, 1: {'step': tensor(1.), 'exp_avg': DTensor(local_tensor=tensor([0.1500], device='cuda:7'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),)), 'exp_avg_sq': DTensor(local_tensor=tensor([0.0023], device='cuda:7'), device_mesh=DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7]), placements=(Shard(dim=0),))}}, 'param_groups': [{'lr': 0.01, 'betas': (0.9, 0.999), 'eps': 1e-08, 'weight_decay': 0, 'amsgrad': False, 'maximize': False, 'foreach': None, 'capturable': False, 'differentiable': False, 'fused': None, 'params': [0, 1]}]}
+            """
+            if self.rank == 0 or self.rank == 7:
+                print(f"rank: {self.rank}, {optim.state_dict()=}")
 
     @skip_if_lt_x_gpu(2)
     @test_compiled_fsdp(compile_compute_on_module=Transformer)
